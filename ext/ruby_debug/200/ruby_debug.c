@@ -22,15 +22,6 @@
 
 RUBY_EXTERN int rb_vm_get_sourceline(const rb_control_frame_t *cfp); /* from vm.c */
 
-#ifndef RUBY_200
-/* from iseq.c */
-#ifdef RB_ISEQ_COMPILE_5ARGS
-RUBY_EXTERN VALUE rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE filepath, VALUE line, VALUE opt);
-#else
-RUBY_EXTERN VALUE rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE line, VALUE opt);
-#endif
-#endif
-
 typedef struct {
     st_table *tbl;
 } threads_table_t;
@@ -115,33 +106,6 @@ get_event_name(rb_event_flag_t _event)
   }
 }
 
-/* copy from vm.c */
-static VALUE *
-vm_base_ptr(rb_control_frame_t *cfp)
-{
-#ifdef RUBY_200
-    rb_control_frame_t *prev_cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
-    VALUE *bp = prev_cfp->sp + cfp->iseq->local_size + 1;
-
-    if (cfp->iseq->type == ISEQ_TYPE_METHOD) {
-	bp += 1;
-    }
-    return bp;
-#else
-    return cfp->bp;
-#endif
-}
-
-inline static VALUE *
-control_frame_ep(rb_control_frame_t *control_frame)
-{
-#ifdef RUBY_200
-    return control_frame->ep;
-#else
-    return control_frame->dfp;
-#endif
-}
-
 inline static void
 reset_stepping_stop_points(debug_context_t *debug_context)
 {
@@ -176,6 +140,15 @@ id2ref(VALUE id)
     return id;
 }
 
+const rb_data_type_t ruby_threadptr_data_type;
+
+rb_thread_t *ruby_current_thread;
+
+void rb_thread_set_current_thread ()
+{
+    ruby_current_thread = (rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current());
+}
+
 inline static VALUE
 context_thread_0(debug_context_t *debug_context)
 {
@@ -185,19 +158,14 @@ context_thread_0(debug_context_t *debug_context)
 static inline const rb_data_type_t *
 threadptr_data_type(void)
 {
-    static const rb_data_type_t *thread_data_type;
-    if (!thread_data_type)
-    {
-        VALUE current_thread = rb_thread_current();
-        thread_data_type = RTYPEDDATA_TYPE(current_thread);
-    }
-    return thread_data_type;
+  static const rb_data_type_t *thread_data_type;
+  if (!thread_data_type)
+  {
+    VALUE current_thread = rb_thread_current();
+    thread_data_type = RTYPEDDATA_TYPE(current_thread);
+  }
+  return thread_data_type;
 }
-
-#define ruby_thread_data_type *threadptr_data_type()
-#define ruby_threadptr_data_type *threadptr_data_type()
-
-#define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
 
 static int
 is_in_locked(VALUE thread_id)
@@ -507,14 +475,26 @@ call_at_line(VALUE context, debug_context_t *debug_context, VALUE file, VALUE li
     return rb_protect(call_at_line_unprotected, args, 0);
 }
 
+/* copy from vm.c */
+static VALUE *
+vm_base_ptr(rb_control_frame_t *cfp)
+{
+    rb_control_frame_t *prev_cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+    VALUE *bp = prev_cfp->sp + cfp->iseq->local_size + 1;
+
+    if (cfp->iseq->type == ISEQ_TYPE_METHOD) {
+	bp += 1;
+    }
+    return bp;
+}
+
 static void
 save_call_frame(rb_event_flag_t _event, debug_context_t *debug_context, VALUE self, char *file, int line, ID mid)
 {
     VALUE binding;
     debug_frame_t *debug_frame;
     int frame_n;
-    rb_thread_t *thread;
-    GetThreadPtr(rb_thread_current(), thread);
+    rb_thread_set_current_thread();
 
     binding = self && RTEST(keep_frame_binding)? create_binding(self) : Qnil;
 
@@ -533,12 +513,11 @@ save_call_frame(rb_event_flag_t _event, debug_context_t *debug_context, VALUE se
     debug_frame->dead = 0;
     debug_frame->self = self;
     debug_frame->arg_ary = Qnil;
-    debug_frame->argc = thread->cfp->iseq->argc;
-    debug_frame->info.runtime.cfp = thread->cfp;
-    debug_frame->info.runtime.bp = vm_base_ptr(thread->cfp);
-    debug_frame->info.runtime.block_iseq = thread->cfp->block_iseq;
+    debug_frame->argc = GET_THREAD()->cfp->iseq->argc;
+    debug_frame->info.runtime.cfp = GET_THREAD()->cfp;
+    debug_frame->info.runtime.block_iseq = GET_THREAD()->cfp->block_iseq;
     debug_frame->info.runtime.block_pc = NULL;
-    debug_frame->info.runtime.last_pc = thread->cfp->pc;
+    debug_frame->info.runtime.last_pc = GET_THREAD()->cfp->pc;
     if (RTEST(track_frame_args))
         copy_scalar_args(debug_frame);
 }
@@ -609,25 +588,23 @@ inline static void
 set_frame_source(rb_event_flag_t event, debug_context_t *debug_context, VALUE self, char *file, int line, ID mid)
 {
     debug_frame_t *top_frame;
-    rb_thread_t *thread;
+    rb_thread_set_current_thread();
     top_frame = get_top_frame(debug_context);
-    GetThreadPtr(rb_thread_current(), thread);
-
     if(top_frame)
     {
-        if (top_frame->info.runtime.block_iseq == thread->cfp->iseq)
+        if (top_frame->info.runtime.block_iseq == GET_THREAD()->cfp->iseq)
         {
-            top_frame->info.runtime.block_pc = thread->cfp->pc;
+            top_frame->info.runtime.block_pc = GET_THREAD()->cfp->pc;
             top_frame->binding = create_binding(self); /* block entered; need to rebind */
         }
-        else if ((top_frame->info.runtime.block_pc != NULL) && (thread->cfp->pc == top_frame->info.runtime.block_pc))
+        else if ((top_frame->info.runtime.block_pc != NULL) && (GET_THREAD()->cfp->pc == top_frame->info.runtime.block_pc))
         {
             top_frame->binding = create_binding(self); /* block re-entered; need to rebind */
         }
 
-        top_frame->info.runtime.block_iseq = thread->cfp->block_iseq;
+        top_frame->info.runtime.block_iseq = GET_THREAD()->cfp->block_iseq;
         if (event == RUBY_EVENT_LINE)
-            top_frame->info.runtime.last_pc = thread->cfp->pc;
+            top_frame->info.runtime.last_pc = GET_THREAD()->cfp->pc;
         top_frame->self = self;
         top_frame->file = file;
         top_frame->line = line;
@@ -701,25 +678,20 @@ static struct iseq_catch_table_entry *
 create_catch_table(debug_context_t *debug_context, unsigned long cont)
 {
     struct iseq_catch_table_entry *catch_table = &debug_context->catch_table.tmp_catch_table;
-    rb_thread_t *thread;
-    GetThreadPtr(rb_thread_current(), thread);
+    rb_thread_set_current_thread();
 
-    thread->parse_in_eval++;
-    thread->mild_compile_error++;
+    GET_THREAD()->parse_in_eval++;
+    GET_THREAD()->mild_compile_error++;
     /* compiling with option Qfalse (no options) prevents debug hook calls during this catch routine */
 #ifdef RB_ISEQ_COMPILE_5ARGS
     catch_table->iseq = rb_iseq_compile_with_option(
-        rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), Qnil, INT2FIX(1),
-#ifdef RUBY_200
-        Qnil,
-#endif
-        Qfalse);
+        rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), Qnil, INT2FIX(1), Qnil, Qfalse);
 #else
     catch_table->iseq = rb_iseq_compile_with_option(
-        rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), INT2FIX(1), Qfalse);
+        rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), INT2FIX(1), Qnil, Qfalse);
 #endif
-    thread->mild_compile_error--;
-    thread->parse_in_eval--;
+    GET_THREAD()->mild_compile_error--;
+    GET_THREAD()->parse_in_eval--;
 
     catch_table->type = CATCH_TYPE_RESCUE;
     catch_table->start = 0;
@@ -728,19 +700,6 @@ create_catch_table(debug_context_t *debug_context, unsigned long cont)
     catch_table->sp = 0;
 
     return(catch_table);
-}
-
-static int
-set_thread_event_flag_i(st_data_t key, st_data_t val, st_data_t flag)
-{
-    VALUE thval = (VALUE)key;
-    rb_thread_t *th;
-    GetThreadPtr(thval, th);
-#ifndef RUBY_200
-    th->event_flags |= RUBY_EVENT_VM;
-#endif
-
-    return(ST_CONTINUE);
 }
 
 static void
@@ -752,9 +711,8 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
     char *file = (char*)rb_sourcefile();
     int line = rb_sourceline();
     int moved = 0;
-    rb_thread_t *thread;
-    GetThreadPtr(rb_thread_current(), thread);
-
+    rb_thread_set_current_thread();
+    rb_thread_t *thread = GET_THREAD();
     struct rb_iseq_struct *iseq = thread->cfp->iseq;
 
     hook_count++;
@@ -768,10 +726,6 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         mid = iseq->defined_method_id;
         klass = iseq->klass;
     }
-
-#ifndef RUBY_200
-    if (mid == ID_ALLOCATOR) return;
-#endif
 
     /* return if thread is marked as 'ignored'.
        debugger's threads are marked this way
@@ -817,9 +771,6 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         free(debug_context->old_iseq_catch);
         debug_context->old_iseq_catch = NULL;
     }
-
-    /* make sure all threads have event flag set so we'll get its events */
-    st_foreach(thread->vm->living_threads, set_thread_event_flag_i, 0);
 
     /* remove any frames that are now out of scope */
     while(debug_context->stack_size > 0)
@@ -996,7 +947,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         while(debug_context->stack_size > 0)
         {
             debug_context->stack_size--;
-            if (debug_context->frames[debug_context->stack_size].info.runtime.bp <= vm_base_ptr(thread->cfp))
+            if (vm_base_ptr(debug_context->frames[debug_context->stack_size].info.runtime.cfp) <= vm_base_ptr(GET_THREAD()->cfp))
                 break;
         }
         CTX_FL_SET(debug_context, CTX_FL_ENABLE_BKPT);
@@ -1171,12 +1122,11 @@ debug_start(VALUE self)
         rdebug_breakpoints = rb_ary_new();
         rdebug_catchpoints = rb_hash_new();
         rdebug_threads_tbl = threads_table_create();
-
         rb_add_event_hook(debug_event_hook, RUBY_EVENT_ALL, Qnil);
         result = Qtrue;
     }
 
-    if(rb_block_given_p())
+    if(rb_block_given_p()) 
       rb_ensure(rb_yield, self, debug_stop_i, self);
 
     return result;
@@ -1756,7 +1706,7 @@ optional_frame_position(int argc, VALUE *argv) {
 /*
  *   call-seq:
  *      context.frame_args_info(frame_position=0) -> list
- *      if track_frame_args or nil otherwise
+        if track_frame_args or nil otherwise
  *
  *   Returns info saved about call arguments (if any saved).
  */
@@ -1867,12 +1817,7 @@ context_frame_file(int argc, VALUE *argv, VALUE self)
     frame = optional_frame_position(argc, argv);
     Data_Get_Struct(self, debug_context_t, debug_context);
 
-    rb_iseq_t* iseq = GET_FRAME->info.runtime.cfp->iseq;
-#ifdef RUBY_200
-    return iseq->location.path;
-#else
-    return iseq->filename;
-#endif
+    return(GET_FRAME->info.runtime.cfp->iseq->location.path);
 }
 
 static int
@@ -1909,7 +1854,8 @@ copy_scalar_args(debug_frame_t *debug_frame)
         for (i = 0; i < iseq->argc; i++)
         {
             if (!rb_is_local_id(iseq->local_table[i])) continue; /* skip flip states */
-            val = *(control_frame_ep(cfp) - iseq->local_size + i);
+
+            val = *(cfp->ep - iseq->local_size + i);
 
             if (arg_value_is_small(val))
                 rb_ary_push(debug_frame->arg_ary, val);
@@ -1970,7 +1916,7 @@ context_copy_locals(debug_context_t *debug_context, debug_frame_t *debug_frame, 
         {
             VALUE str = rb_id2str(iseq->local_table[i]);
             if (str != 0)
-                rb_hash_aset(hash, str, *(control_frame_ep(cfp) - iseq->local_size + i));
+                rb_hash_aset(hash, str, *(cfp->ep - iseq->local_size + i));
         }
     }
 
@@ -1988,7 +1934,7 @@ context_copy_locals(debug_context_t *debug_context, debug_frame_t *debug_frame, 
                 {
                     VALUE str = rb_id2str(iseq->local_table[i]);
                     if (str != 0)
-                        rb_hash_aset(hash, str, *(control_frame_ep(block_frame) - iseq->local_table_size + i - 1));
+                        rb_hash_aset(hash, str, *(block_frame->ep - iseq->local_table_size + i - 1));
                 }
                 return(hash);
             }
@@ -2455,25 +2401,11 @@ context_jump(VALUE self, VALUE line, VALUE file)
     /* find target frame to jump to */
     while (RUBY_VM_VALID_CONTROL_FRAME_P(cfp, cfp_end))
     {
-        VALUE location_path;
-#ifdef RUBY_200
-        location_path = cfp->iseq->location.path;
-#else
-        location_path = cfp->iseq->filename;
-#endif
-        if ((cfp->iseq != NULL) && (rb_str_cmp(file, location_path) == 0))
+        if ((cfp->iseq != NULL) && (rb_str_cmp(file, cfp->iseq->location.path) == 0))
         {
-#ifdef RUBY_200
             for (i = 0; i < cfp->iseq->line_info_size; i++)
-#else
-            for (i = 0; i < cfp->iseq->insn_info_size; i++)
-#endif
             {
-#ifdef RUBY_200
                 if (cfp->iseq->line_info_table[i].line_no != line)
-#else
-                if (cfp->iseq->insn_info_table[i].line_no != line)
-#endif
                     continue;
 
                 /* hijack the currently running code so that we can change the frame PC */
@@ -2483,13 +2415,9 @@ context_jump(VALUE self, VALUE line, VALUE file)
                 cfp_start->pc[1] = (VALUE)do_jump;
 
                 debug_context->jump_cfp = cfp;
-                unsigned int position;
-#ifdef RUBY_200
-                position = cfp->iseq->line_info_table[i].position;
-#else
-                position = cfp->iseq->insn_info_table[i].position;
-#endif
-                debug_context->jump_pc = cfp->iseq->iseq_encoded + position;
+                debug_context->jump_pc =
+                    cfp->iseq->iseq_encoded + cfp->iseq->line_info_table[i].position;
+
                 return(INT2FIX(0)); /* success */
             }
         }
@@ -2511,8 +2439,7 @@ context_pause(VALUE self)
 {
     debug_context_t *debug_context;
     rb_thread_t *th;
-    rb_thread_t *current_thread;
-    GetThreadPtr(rb_thread_current(), current_thread);
+    rb_thread_set_current_thread();
 
     debug_check_started();
 
@@ -2521,7 +2448,7 @@ context_pause(VALUE self)
         return(Qfalse);
 
     GetThreadPtr(context_thread_0(debug_context), th);
-    if (th == current_thread)
+    if (th == GET_THREAD())
         return(Qfalse);
 
     debug_context->thread_pause = 1;

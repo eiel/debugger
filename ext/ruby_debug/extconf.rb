@@ -51,7 +51,7 @@ SRC
   }
 end
 
-header_dir = RUBY_VERSION == '1.9.2' ? '192' : '193'
+header_dir = RUBY_VERSION.delete('.')
 current_dir = File.dirname(__FILE__)
 %w{ruby_debug.h ruby_debug.c breakpoint.c}.each do |file|
   FileUtils.cp("#{current_dir}/#{header_dir}/#{file}", current_dir)
