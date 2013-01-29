@@ -57,6 +57,13 @@ current_dir = File.dirname(__FILE__)
   FileUtils.cp("#{current_dir}/#{header_dir}/#{file}", current_dir)
 end
 
+case RUBY_VERSION
+when /1.9.3/
+  $CFLAGS += " -DRUBY_193"
+when /2.0.0/
+  $CFLAGS += " -DRUBY_200"
+end
+
 dir_config("ruby")
 if !Debugger::RubyCoreSource.create_makefile_with_core(hdrs, "ruby_debug")
   STDERR.print("Makefile creation failed\n")

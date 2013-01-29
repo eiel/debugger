@@ -22,11 +22,13 @@
 
 RUBY_EXTERN int rb_vm_get_sourceline(const rb_control_frame_t *cfp); /* from vm.c */
 
+#ifndef RUBY_200
 /* from iseq.c */
 #ifdef RB_ISEQ_COMPILE_5ARGS
 RUBY_EXTERN VALUE rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE filepath, VALUE line, VALUE opt);
 #else
 RUBY_EXTERN VALUE rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE line, VALUE opt);
+#endif
 #endif
 
 typedef struct {
@@ -111,6 +113,23 @@ get_event_name(rb_event_flag_t _event)
     default:
       return "unknown";
   }
+}
+
+/* copy from vm.c */
+static VALUE *
+vm_base_ptr(rb_control_frame_t *cfp)
+{
+#ifdef RUBY_200
+    rb_control_frame_t *prev_cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+    VALUE *bp = prev_cfp->sp + cfp->iseq->local_size + 1;
+
+    if (cfp->iseq->type == ISEQ_TYPE_METHOD) {
+	bp += 1;
+    }
+    return bp;
+#else
+    return cfp->bp;
+#endif
 }
 
 inline static void
@@ -506,7 +525,7 @@ save_call_frame(rb_event_flag_t _event, debug_context_t *debug_context, VALUE se
     debug_frame->arg_ary = Qnil;
     debug_frame->argc = thread->cfp->iseq->argc;
     debug_frame->info.runtime.cfp = thread->cfp;
-    debug_frame->info.runtime.bp = thread->cfp->bp;
+    debug_frame->info.runtime.bp = vm_base_ptr(thread->cfp);
     debug_frame->info.runtime.block_iseq = thread->cfp->block_iseq;
     debug_frame->info.runtime.block_pc = NULL;
     debug_frame->info.runtime.last_pc = thread->cfp->pc;
@@ -680,7 +699,11 @@ create_catch_table(debug_context_t *debug_context, unsigned long cont)
     /* compiling with option Qfalse (no options) prevents debug hook calls during this catch routine */
 #ifdef RB_ISEQ_COMPILE_5ARGS
     catch_table->iseq = rb_iseq_compile_with_option(
-        rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), Qnil, INT2FIX(1), Qfalse);
+        rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), Qnil, INT2FIX(1),
+#ifdef RUBY_200
+        Qnil,
+#endif
+        Qfalse);
 #else
     catch_table->iseq = rb_iseq_compile_with_option(
         rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), INT2FIX(1), Qfalse);
@@ -703,7 +726,9 @@ set_thread_event_flag_i(st_data_t key, st_data_t val, st_data_t flag)
     VALUE thval = (VALUE)key;
     rb_thread_t *th;
     GetThreadPtr(thval, th);
+#ifndef RUBY_200
     th->event_flags |= RUBY_EVENT_VM;
+#endif
 
     return(ST_CONTINUE);
 }
@@ -734,7 +759,9 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         klass = iseq->klass;
     }
 
+#ifndef RUBY_200
     if (mid == ID_ALLOCATOR) return;
+#endif
 
     /* return if thread is marked as 'ignored'.
        debugger's threads are marked this way
@@ -787,7 +814,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
     /* remove any frames that are now out of scope */
     while(debug_context->stack_size > 0)
     {
-        if (debug_context->frames[debug_context->stack_size - 1].info.runtime.bp <= thread->cfp->bp)
+        if (debug_context->frames[debug_context->stack_size - 1].info.runtime.bp <= vm_base_ptr(thread->cfp))
             break;
         debug_context->stack_size--;
     }
@@ -959,7 +986,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         while(debug_context->stack_size > 0)
         {
             debug_context->stack_size--;
-            if (debug_context->frames[debug_context->stack_size].info.runtime.bp <= thread->cfp->bp)
+            if (debug_context->frames[debug_context->stack_size].info.runtime.bp <= vm_base_ptr(thread->cfp))
                 break;
         }
         CTX_FL_SET(debug_context, CTX_FL_ENABLE_BKPT);
@@ -1830,7 +1857,12 @@ context_frame_file(int argc, VALUE *argv, VALUE self)
     frame = optional_frame_position(argc, argv);
     Data_Get_Struct(self, debug_context_t, debug_context);
 
-    return(GET_FRAME->info.runtime.cfp->iseq->filename);
+    rb_iseq_t* iseq = GET_FRAME->info.runtime.cfp->iseq;
+#ifdef RUBY_200
+    return iseq->location.path;
+#else
+    return iseq->filename;
+#endif
 }
 
 static int
@@ -1846,6 +1878,16 @@ arg_value_is_small(VALUE val)
   }
 }
 
+
+inline VALUE *
+control_frame_ep(rb_control_frame_t *control_frame)
+{
+#ifdef RUBY_200
+    return control_frame->ep;
+#else
+    return control_frame->dfp;
+#endif
+}
 /*
  *   Save scalar arguments or a class name.
  */
@@ -1867,8 +1909,7 @@ copy_scalar_args(debug_frame_t *debug_frame)
         for (i = 0; i < iseq->argc; i++)
         {
             if (!rb_is_local_id(iseq->local_table[i])) continue; /* skip flip states */
-
-            val = *(cfp->dfp - iseq->local_size + i);
+            val = *(control_frame_ep(cfp) - iseq->local_size + i);
 
             if (arg_value_is_small(val))
                 rb_ary_push(debug_frame->arg_ary, val);
@@ -1929,7 +1970,7 @@ context_copy_locals(debug_context_t *debug_context, debug_frame_t *debug_frame, 
         {
             VALUE str = rb_id2str(iseq->local_table[i]);
             if (str != 0)
-                rb_hash_aset(hash, str, *(cfp->dfp - iseq->local_size + i));
+                rb_hash_aset(hash, str, *(control_frame_ep(cfp) - iseq->local_size + i));
         }
     }
 
@@ -1947,7 +1988,7 @@ context_copy_locals(debug_context_t *debug_context, debug_frame_t *debug_frame, 
                 {
                     VALUE str = rb_id2str(iseq->local_table[i]);
                     if (str != 0)
-                        rb_hash_aset(hash, str, *(block_frame->dfp - iseq->local_table_size + i - 1));
+                        rb_hash_aset(hash, str, *(control_frame_ep(block_frame) - iseq->local_table_size + i - 1));
                 }
                 return(hash);
             }
@@ -2414,11 +2455,25 @@ context_jump(VALUE self, VALUE line, VALUE file)
     /* find target frame to jump to */
     while (RUBY_VM_VALID_CONTROL_FRAME_P(cfp, cfp_end))
     {
-        if ((cfp->iseq != NULL) && (rb_str_cmp(file, cfp->iseq->filename) == 0))
+        VALUE location_path;
+#ifdef RUBY_200
+        location_path = cfp->iseq->location.path;
+#else
+        location_path = cfp->iseq->filename;
+#endif
+        if ((cfp->iseq != NULL) && (rb_str_cmp(file, location_path) == 0))
         {
+#ifdef RUBY_200
+            for (i = 0; i < cfp->iseq->line_info_size; i++)
+#else
             for (i = 0; i < cfp->iseq->insn_info_size; i++)
+#endif
             {
+#ifdef RUBY_200
+                if (cfp->iseq->line_info_table[i].line_no != line)
+#else
                 if (cfp->iseq->insn_info_table[i].line_no != line)
+#endif
                     continue;
 
                 /* hijack the currently running code so that we can change the frame PC */
@@ -2428,9 +2483,13 @@ context_jump(VALUE self, VALUE line, VALUE file)
                 cfp_start->pc[1] = (VALUE)do_jump;
 
                 debug_context->jump_cfp = cfp;
-                debug_context->jump_pc =
-                    cfp->iseq->iseq_encoded + cfp->iseq->insn_info_table[i].position;
-
+                unsigned int position;
+#ifdef RUBY_200
+                position = cfp->iseq->line_info_table[i].position;
+#else
+                position = cfp->iseq->insn_info_table[i].position;
+#endif
+                debug_context->jump_pc = cfp->iseq->iseq_encoded + position;
                 return(INT2FIX(0)); /* success */
             }
         }
