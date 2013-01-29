@@ -156,15 +156,16 @@ context_thread_0(debug_context_t *debug_context)
 static inline const rb_data_type_t *
 threadptr_data_type(void)
 {
-  static const rb_data_type_t *thread_data_type;
-  if (!thread_data_type)
-  {
-    VALUE current_thread = rb_thread_current();
-    thread_data_type = RTYPEDDATA_TYPE(current_thread);
-  }
-  return thread_data_type;
+    static const rb_data_type_t *thread_data_type;
+    if (!thread_data_type)
+    {
+        VALUE current_thread = rb_thread_current();
+        thread_data_type = RTYPEDDATA_TYPE(current_thread);
+    }
+    return thread_data_type;
 }
 
+#define ruby_thread_data_type *threadptr_data_type()
 #define ruby_threadptr_data_type *threadptr_data_type()
 
 #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
@@ -483,6 +484,8 @@ save_call_frame(rb_event_flag_t _event, debug_context_t *debug_context, VALUE se
     VALUE binding;
     debug_frame_t *debug_frame;
     int frame_n;
+    rb_thread_t *thread;
+    GetThreadPtr(rb_thread_current(), thread);
 
     binding = self && RTEST(keep_frame_binding)? create_binding(self) : Qnil;
 
@@ -501,12 +504,12 @@ save_call_frame(rb_event_flag_t _event, debug_context_t *debug_context, VALUE se
     debug_frame->dead = 0;
     debug_frame->self = self;
     debug_frame->arg_ary = Qnil;
-    debug_frame->argc = GET_THREAD()->cfp->iseq->argc;
-    debug_frame->info.runtime.cfp = GET_THREAD()->cfp;
-    debug_frame->info.runtime.bp = GET_THREAD()->cfp->bp;
-    debug_frame->info.runtime.block_iseq = GET_THREAD()->cfp->block_iseq;
+    debug_frame->argc = thread->cfp->iseq->argc;
+    debug_frame->info.runtime.cfp = thread->cfp;
+    debug_frame->info.runtime.bp = thread->cfp->bp;
+    debug_frame->info.runtime.block_iseq = thread->cfp->block_iseq;
     debug_frame->info.runtime.block_pc = NULL;
-    debug_frame->info.runtime.last_pc = GET_THREAD()->cfp->pc;
+    debug_frame->info.runtime.last_pc = thread->cfp->pc;
     if (RTEST(track_frame_args))
         copy_scalar_args(debug_frame);
 }
@@ -577,22 +580,25 @@ inline static void
 set_frame_source(rb_event_flag_t event, debug_context_t *debug_context, VALUE self, char *file, int line, ID mid)
 {
     debug_frame_t *top_frame;
+    rb_thread_t *thread;
     top_frame = get_top_frame(debug_context);
+    GetThreadPtr(rb_thread_current(), thread);
+
     if(top_frame)
     {
-        if (top_frame->info.runtime.block_iseq == GET_THREAD()->cfp->iseq)
+        if (top_frame->info.runtime.block_iseq == thread->cfp->iseq)
         {
-            top_frame->info.runtime.block_pc = GET_THREAD()->cfp->pc;
+            top_frame->info.runtime.block_pc = thread->cfp->pc;
             top_frame->binding = create_binding(self); /* block entered; need to rebind */
         }
-        else if ((top_frame->info.runtime.block_pc != NULL) && (GET_THREAD()->cfp->pc == top_frame->info.runtime.block_pc))
+        else if ((top_frame->info.runtime.block_pc != NULL) && (thread->cfp->pc == top_frame->info.runtime.block_pc))
         {
             top_frame->binding = create_binding(self); /* block re-entered; need to rebind */
         }
 
-        top_frame->info.runtime.block_iseq = GET_THREAD()->cfp->block_iseq;
+        top_frame->info.runtime.block_iseq = thread->cfp->block_iseq;
         if (event == RUBY_EVENT_LINE)
-            top_frame->info.runtime.last_pc = GET_THREAD()->cfp->pc;
+            top_frame->info.runtime.last_pc = thread->cfp->pc;
         top_frame->self = self;
         top_frame->file = file;
         top_frame->line = line;
@@ -666,9 +672,11 @@ static struct iseq_catch_table_entry *
 create_catch_table(debug_context_t *debug_context, unsigned long cont)
 {
     struct iseq_catch_table_entry *catch_table = &debug_context->catch_table.tmp_catch_table;
+    rb_thread_t *thread;
+    GetThreadPtr(rb_thread_current(), thread);
 
-    GET_THREAD()->parse_in_eval++;
-    GET_THREAD()->mild_compile_error++;
+    thread->parse_in_eval++;
+    thread->mild_compile_error++;
     /* compiling with option Qfalse (no options) prevents debug hook calls during this catch routine */
 #ifdef RB_ISEQ_COMPILE_5ARGS
     catch_table->iseq = rb_iseq_compile_with_option(
@@ -677,8 +685,8 @@ create_catch_table(debug_context_t *debug_context, unsigned long cont)
     catch_table->iseq = rb_iseq_compile_with_option(
         rb_str_new_cstr(""), rb_str_new_cstr("(exception catcher)"), INT2FIX(1), Qfalse);
 #endif
-    GET_THREAD()->mild_compile_error--;
-    GET_THREAD()->parse_in_eval--;
+    thread->mild_compile_error--;
+    thread->parse_in_eval--;
 
     catch_table->type = CATCH_TYPE_RESCUE;
     catch_table->start = 0;
@@ -709,7 +717,9 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
     char *file = (char*)rb_sourcefile();
     int line = rb_sourceline();
     int moved = 0;
-    rb_thread_t *thread = GET_THREAD();
+    rb_thread_t *thread;
+    GetThreadPtr(rb_thread_current(), thread);
+
     struct rb_iseq_struct *iseq = thread->cfp->iseq;
 
     hook_count++;
@@ -949,7 +959,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         while(debug_context->stack_size > 0)
         {
             debug_context->stack_size--;
-            if (debug_context->frames[debug_context->stack_size].info.runtime.bp <= GET_THREAD()->cfp->bp)
+            if (debug_context->frames[debug_context->stack_size].info.runtime.bp <= thread->cfp->bp)
                 break;
         }
         CTX_FL_SET(debug_context, CTX_FL_ENABLE_BKPT);
@@ -2442,6 +2452,8 @@ context_pause(VALUE self)
 {
     debug_context_t *debug_context;
     rb_thread_t *th;
+    rb_thread_t *current_thread;
+    GetThreadPtr(rb_thread_current(), current_thread);
 
     debug_check_started();
 
@@ -2450,7 +2462,7 @@ context_pause(VALUE self)
         return(Qfalse);
 
     GetThreadPtr(context_thread_0(debug_context), th);
-    if (th == GET_THREAD())
+    if (th == current_thread)
         return(Qfalse);
 
     debug_context->thread_pause = 1;
