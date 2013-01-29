@@ -231,13 +231,13 @@ threads_table_mark_keyvalue(st_data_t key, st_data_t value, st_data_t tbl)
 
     rb_gc_mark((VALUE)value);
     if (is_living_thread(thread))
-        rb_gc_mark(thread);       
+        rb_gc_mark(thread);
     else
         st_insert((st_table *)tbl, key, 0);
 
     return ST_CONTINUE;
 }
-        
+
 static void
 threads_table_mark(void* data)
 {
@@ -469,7 +469,7 @@ static VALUE
 call_at_line(VALUE context, debug_context_t *debug_context, VALUE file, VALUE line)
 {
     VALUE args;
-    
+
     last_debugged_thnum = debug_context->thnum;
     save_current_position(debug_context);
 
@@ -634,7 +634,7 @@ c_call_new_frame_p(VALUE klass, ID mid)
     return 0;
 }
 
-static void 
+static void
 call_at_line_check(VALUE self, debug_context_t *debug_context, VALUE breakpoint, VALUE context, char *file, int line)
 {
     VALUE binding = self? create_binding(self) : Qnil;
@@ -782,7 +782,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         debug_context->stack_size--;
     }
 
-    if (debug_context->thread_pause) 
+    if (debug_context->thread_pause)
     {
         debug_context->thread_pause = 0;
         debug_context->stop_next = 1;
@@ -792,10 +792,10 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
     else
     {
         /* ignore a skipped section of code */
-        if (CTX_FL_TEST(debug_context, CTX_FL_SKIPPED)) 
+        if (CTX_FL_TEST(debug_context, CTX_FL_SKIPPED))
             goto cleanup;
 
-        if ((event == RUBY_EVENT_LINE) && (debug_context->stack_size > 0) && 
+        if ((event == RUBY_EVENT_LINE) && (debug_context->stack_size > 0) &&
             (get_top_frame(debug_context)->line == line) && (get_top_frame(debug_context)->info.runtime.cfp->iseq == iseq) &&
             !CTX_FL_TEST(debug_context, CTX_FL_CATCHING))
         {
@@ -815,7 +815,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
     {
         CTX_FL_SET(debug_context, CTX_FL_ENABLE_BKPT);
         moved = 1;
-    } 
+    }
 
     if(event != RUBY_EVENT_LINE)
         CTX_FL_SET(debug_context, CTX_FL_STEPPED);
@@ -832,7 +832,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
         if (CTX_FL_TEST(debug_context, CTX_FL_CATCHING))
         {
             debug_frame_t *top_frame = get_top_frame(debug_context);
-            
+
             if (top_frame != NULL)
             {
                 rb_control_frame_t *cfp = top_frame->info.runtime.cfp;
@@ -841,9 +841,9 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
                 /* restore the proper catch table */
                 cfp->iseq->catch_table_size = debug_context->catch_table.old_catch_table_size;
                 cfp->iseq->catch_table = debug_context->catch_table.old_catch_table;
-                
+
                 /* send catchpoint notification */
-                hit_count = INT2FIX(FIX2INT(rb_hash_aref(rdebug_catchpoints, 
+                hit_count = INT2FIX(FIX2INT(rb_hash_aref(rdebug_catchpoints,
                     debug_context->catch_table.mod_name)+1));
                 rb_hash_aset(rdebug_catchpoints, debug_context->catch_table.mod_name, hit_count);
                 debug_context->stop_reason = CTX_STOP_CATCHPOINT;
@@ -858,7 +858,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
             CTX_FL_UNSET(debug_context, CTX_FL_CATCHING);
             break;
         }
-        
+
         if(RTEST(tracing) || CTX_FL_TEST(debug_context, CTX_FL_TRACING))
             rb_funcall(context, idAtTracing, 2, rb_str_new2(file), INT2FIX(line));
 
@@ -869,7 +869,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
                 debug_context->stop_next--;
             if(debug_context->stop_next < 0)
                 debug_context->stop_next = -1;
-            if(moved || (CTX_FL_TEST(debug_context, CTX_FL_STEPPED) && 
+            if(moved || (CTX_FL_TEST(debug_context, CTX_FL_STEPPED) &&
                         !CTX_FL_TEST(debug_context, CTX_FL_FORCE_MOVE)))
             {
                 debug_context->stop_line--;
@@ -885,7 +885,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
             (breakpoint = check_breakpoints_by_pos(debug_context, file, line)) != Qnil)
         {
             call_at_line_check(self, debug_context, breakpoint, context, file, line);
-        } 
+        }
         break;
     }
     case RUBY_EVENT_CALL:
@@ -1055,7 +1055,7 @@ debug_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID mid, VALUE kl
     }
 
     cleanup:
-  
+
     debug_context->stop_reason = CTX_STOP_NONE;
 
     /* check that all contexts point to alive threads */
@@ -1101,7 +1101,7 @@ debug_stop_i(VALUE self)
  *   Debugger.stop method. Inside the block you will probably want to
  *   have a call to Debugger.debugger. For example:
  *     Debugger.start{debugger; foo}  # Stop inside of foo
- * 
+ *
  *   Also, ruby-debug only allows
  *   one invocation of debugger at a time; nested Debugger.start's
  *   have no effect and you can't use this inside the debugger itself.
@@ -1129,7 +1129,7 @@ debug_start(VALUE self)
         result = Qtrue;
     }
 
-    if(rb_block_given_p()) 
+    if(rb_block_given_p())
       rb_ensure(rb_yield, self, debug_stop_i, self);
 
     return result;
@@ -1472,7 +1472,7 @@ debug_thread_inherited(VALUE klass)
  *   +stop+ parameter forces the debugger to stop at the first line of code in the +file+
  *   +increment_start+ determines if start_count should be incremented. When
  *    control threads are used, they have to be set up before loading the
- *    debugger; so here +increment_start+ will be false.    
+ *    debugger; so here +increment_start+ will be false.
  *   FOR INTERNAL USE ONLY.
  */
 static VALUE
@@ -1481,8 +1481,8 @@ debug_debug_load(int argc, VALUE *argv, VALUE self)
     VALUE file, stop, context, increment_start;
     debug_context_t *debug_context;
     int state = 0;
-    
-    if(rb_scan_args(argc, argv, "12", &file, &stop, &increment_start) == 1) 
+
+    if(rb_scan_args(argc, argv, "12", &file, &stop, &increment_start) == 1)
     {
         stop = Qfalse;
         increment_start = Qtrue;
@@ -1490,7 +1490,7 @@ debug_debug_load(int argc, VALUE *argv, VALUE self)
 
     debug_start(self);
     if (Qfalse == increment_start) start_count--;
-    
+
     context = debug_current_context(self);
     Data_Get_Struct(context, debug_context_t, debug_context);
     debug_context->stack_size = 0;
@@ -1499,7 +1499,7 @@ debug_debug_load(int argc, VALUE *argv, VALUE self)
     /* Initializing $0 to the script's path */
     ruby_script(RSTRING_PTR(file));
     rb_load_protect(file, 0, &state);
-    if (0 != state) 
+    if (0 != state)
     {
         VALUE errinfo = rb_errinfo();
         debug_suspend(self);
@@ -1508,7 +1508,7 @@ debug_debug_load(int argc, VALUE *argv, VALUE self)
         return errinfo;
     }
 
-    /* We should run all at_exit handler's in order to provide, 
+    /* We should run all at_exit handler's in order to provide,
      * for instance, a chance to run all defined test cases */
     rb_exec_end_proc();
 
@@ -1692,7 +1692,7 @@ check_frame_number(debug_context_t *debug_context, VALUE frame)
     return frame_n;
 }
 
-static int 
+static int
 optional_frame_position(int argc, VALUE *argv) {
   unsigned int i_scanned;
   VALUE level;
@@ -1708,8 +1708,8 @@ optional_frame_position(int argc, VALUE *argv) {
 
 /*
  *   call-seq:
- *      context.frame_args_info(frame_position=0) -> list 
-        if track_frame_args or nil otherwise
+ *      context.frame_args_info(frame_position=0) -> list
+ *      if track_frame_args or nil otherwise
  *
  *   Returns info saved about call arguments (if any saved).
  */
@@ -1824,7 +1824,7 @@ context_frame_file(int argc, VALUE *argv, VALUE self)
 }
 
 static int
-arg_value_is_small(VALUE val) 
+arg_value_is_small(VALUE val)
 {
   switch (TYPE(val)) {
   case T_FIXNUM: case T_FLOAT:  case T_CLASS:
@@ -1942,7 +1942,7 @@ context_copy_locals(debug_context_t *debug_context, debug_frame_t *debug_frame, 
                 return(hash);
             }
             block_frame = RUBY_VM_NEXT_CONTROL_FRAME(block_frame);
-        } 
+        }
     }
 
     return(hash);
@@ -1960,7 +1960,7 @@ context_frame_locals(int argc, VALUE *argv, VALUE self)
     VALUE frame;
     debug_context_t *debug_context;
     debug_frame_t *debug_frame;
-    
+
     debug_check_started();
     frame = optional_frame_position(argc, argv);
     Data_Get_Struct(self, debug_context_t, debug_context);
@@ -2008,7 +2008,7 @@ context_frame_self(int argc, VALUE *argv, VALUE self)
     VALUE frame;
     debug_context_t *debug_context;
     debug_frame_t *debug_frame;
-    
+
     debug_check_started();
     frame = optional_frame_position(argc, argv);
     Data_Get_Struct(self, debug_context_t, debug_context);
@@ -2021,7 +2021,7 @@ context_frame_self(int argc, VALUE *argv, VALUE self)
  *   call-seq:
  *      context.frame_class(frame_position) -> obj
  *
- *   Returns the real class of the frame. 
+ *   Returns the real class of the frame.
  *   It could be different than context.frame_self(frame).class
  */
 static VALUE
@@ -2032,7 +2032,7 @@ context_frame_class(int argc, VALUE *argv, VALUE self)
     debug_context_t *debug_context;
     debug_frame_t *debug_frame;
     rb_control_frame_t *cfp;
-    
+
     debug_check_started();
     frame = optional_frame_position(argc, argv);
     Data_Get_Struct(self, debug_context_t, debug_context);
@@ -2095,7 +2095,7 @@ context_thnum(VALUE self)
 
     debug_check_started();
     Data_Get_Struct(self, debug_context_t, debug_context);
-    
+
     return INT2FIX(debug_context->thnum);
 }
 
@@ -2257,7 +2257,7 @@ context_dead(VALUE self)
 /*
  *   call-seq:
  *      context.stop_reason -> sym
- *   
+ *
  *   Returns the reason for the stop. It maybe of the following values:
  *   :initial, :step, :breakpoint, :catchpoint, :post-mortem
  */
@@ -2270,7 +2270,7 @@ context_stop_reason(VALUE self)
     debug_check_started();
 
     Data_Get_Struct(self, debug_context_t, debug_context);
-    
+
     switch(debug_context->stop_reason)
     {
         case CTX_STOP_STEP:
@@ -2288,7 +2288,7 @@ context_stop_reason(VALUE self)
     }
     if(CTX_FL_TEST(debug_context, CTX_FL_DEAD))
         sym_name = "post-mortem";
-    
+
     return ID2SYM(rb_intern(sym_name));
 }
 
@@ -2306,7 +2306,7 @@ FUNC_FASTCALL(do_jump)(rb_thread_t *th, rb_control_frame_t *cfp)
     cfp->pc[-2] = debug_context->saved_jump_ins[0];
     cfp->pc[-1] = debug_context->saved_jump_ins[1];
 
-    if ((debug_context->jump_pc < debug_context->jump_cfp->iseq->iseq_encoded) || 
+    if ((debug_context->jump_pc < debug_context->jump_cfp->iseq->iseq_encoded) ||
         (debug_context->jump_pc >= debug_context->jump_cfp->iseq->iseq_encoded + debug_context->jump_cfp->iseq->iseq_size))
         rb_raise(rb_eRuntimeError, "Invalid jump PC target");
 
@@ -2344,7 +2344,7 @@ FUNC_FASTCALL(do_jump)(rb_thread_t *th, rb_control_frame_t *cfp)
         } while (cfp <= jump_cfp);
 
         jump_cfp->iseq->catch_table_size = 1;
-        jump_cfp->iseq->catch_table = 
+        jump_cfp->iseq->catch_table =
             create_catch_table(debug_context, jump_pc - jump_cfp->iseq->iseq_encoded);
         jump_cfp->iseq->catch_table->sp = -1;
 
@@ -2493,9 +2493,9 @@ Init_context(void)
     rb_define_method(cContext, "frame_self", context_frame_self, -1);
     rb_define_method(cContext, "stack_size", context_stack_size, 0);
     rb_define_method(cContext, "dead?", context_dead, 0);
-    rb_define_method(cContext, "breakpoint", 
+    rb_define_method(cContext, "breakpoint",
              context_breakpoint, 0);      /* in breakpoint.c */
-    rb_define_method(cContext, "set_breakpoint", 
+    rb_define_method(cContext, "set_breakpoint",
              context_set_breakpoint, -1); /* in breakpoint.c */
     rb_define_method(cContext, "jump", context_jump, 2);
     rb_define_method(cContext, "pause", context_pause, 0);
@@ -2568,12 +2568,12 @@ Init_ruby_debug(void)
     rb_define_module_function(mDebugger, "started?", debug_is_started, 0);
     rb_define_module_function(mDebugger, "breakpoints", debug_breakpoints, 0);
     rb_define_module_function(mDebugger, "add_breakpoint", debug_add_breakpoint, -1);
-    rb_define_module_function(mDebugger, "remove_breakpoint", 
-                  rdebug_remove_breakpoint, 
+    rb_define_module_function(mDebugger, "remove_breakpoint",
+                  rdebug_remove_breakpoint,
                   1);                        /* in breakpoint.c */
-    rb_define_module_function(mDebugger, "add_catchpoint", 
+    rb_define_module_function(mDebugger, "add_catchpoint",
                   rdebug_add_catchpoint, 1); /* in breakpoint.c */
-    rb_define_module_function(mDebugger, "catchpoints", 
+    rb_define_module_function(mDebugger, "catchpoints",
                   debug_catchpoints, 0);     /* in breakpoint.c */
     rb_define_module_function(mDebugger, "last_context", debug_last_interrupted, 0);
     rb_define_module_function(mDebugger, "contexts", debug_contexts, 0);
@@ -2588,13 +2588,13 @@ Init_ruby_debug(void)
     rb_define_module_function(mDebugger, "debug_at_exit", debug_at_exit, 0);
     rb_define_module_function(mDebugger, "post_mortem?", debug_post_mortem, 0);
     rb_define_module_function(mDebugger, "post_mortem=", debug_set_post_mortem, 1);
-    rb_define_module_function(mDebugger, "keep_frame_binding?", 
+    rb_define_module_function(mDebugger, "keep_frame_binding?",
                   debug_keep_frame_binding, 0);
-    rb_define_module_function(mDebugger, "keep_frame_binding=", 
+    rb_define_module_function(mDebugger, "keep_frame_binding=",
                   debug_set_keep_frame_binding, 1);
-    rb_define_module_function(mDebugger, "track_frame_args?", 
+    rb_define_module_function(mDebugger, "track_frame_args?",
                   debug_track_frame_args, 0);
-    rb_define_module_function(mDebugger, "track_frame_args=", 
+    rb_define_module_function(mDebugger, "track_frame_args=",
                   debug_set_track_frame_args, 1);
     rb_define_module_function(mDebugger, "debug", debug_debug, 0);
     rb_define_module_function(mDebugger, "debug=", debug_set_debug, 1);
@@ -2602,7 +2602,7 @@ Init_ruby_debug(void)
     cThreadsTable = rb_define_class_under(mDebugger, "ThreadsTable", rb_cObject);
 
     cDebugThread  = rb_define_class_under(mDebugger, "DebugThread", rb_cThread);
-    rb_define_singleton_method(cDebugThread, "inherited", 
+    rb_define_singleton_method(cDebugThread, "inherited",
                    debug_thread_inherited, 1);
 
     Init_context();
